@@ -1,0 +1,142 @@
+// ==UserScript==
+// @name         Mathspace Auto-Solve Button
+// @namespace    http://tampermonkey.net/
+// @version      1.0
+// @description  Adds an "Auto-Solve" button to Mathspace questions to automatically fill in answers (for educational/research purposes).
+// @author       PhantomCoder666
+// @match        https://mathspace.co/*
+// @grant        none
+// ==/UserScript==
+
+(function() {
+    'use strict';
+
+    // Utility function to wait for a selector to appear
+    function waitForElement(selector, timeout = 10000) {
+        return new Promise((resolve, reject) => {
+            const interval = setInterval(() => {
+                const el = document.querySelector(selector);
+                if (el) {
+                    clearInterval(interval);
+                    resolve(el);
+                }
+            }, 200);
+            setTimeout(() => {
+                clearInterval(interval);
+                reject(new Error('Timeout waiting for element: ' + selector));
+            }, timeout);
+        });
+    }
+
+    // Try to find the correct answer in the question data (works for most question types)
+    function getCorrectAnswer() {
+        // Mathspace stores some answers in window.__INITIAL_STATE__ or embedded in question data
+        let answer = null;
+
+        // Try to find in window.__INITIAL_STATE__ (newer Mathspace)
+        try {
+            if (window.__INITIAL_STATE__) {
+                // Traverse the state for the current question's answer
+                const st = window.__INITIAL_STATE__;
+                // Find current step
+                const session = st.session || st.sessions;
+                if (session) {
+                    const steps = session.steps || session.currentStep || [];
+                    // Try to find correct answer in steps array
+                    for (const s of Array.isArray(steps) ? steps : [steps]) {
+                        if (s.correctAnswer) {
+                            answer = s.correctAnswer;
+                            break;
+                        }
+                        if (s.expected && s.expected.value) {
+                            answer = s.expected.value;
+                            break;
+                        }
+                    }
+                }
+            }
+        } catch (e) {}
+
+        // Fallback: Try to grab correct answer from DOM (if revealed)
+        if (!answer) {
+            const correctAnswerEl = document.querySelector('[data-correct-answer]');
+            if (correctAnswerEl) {
+                answer = correctAnswerEl.getAttribute('data-correct-answer');
+            }
+        }
+
+        // As a last resort, try to find "Show answer" or "Correct answer" text in DOM
+        if (!answer) {
+            const el = document.querySelector('.correct-answer, .show-answer, .ms-answer__correct');
+            if (el) {
+                answer = el.textContent.trim();
+            }
+        }
+
+        return answer;
+    }
+
+    // Fill the answer in the input field
+    function fillAnswer(answer) {
+        // Try common Mathspace input selectors
+        const selectors = [
+            'input[type="text"].ms-input__field',
+            'input[type="number"].ms-input__field',
+            'textarea.ms-input__field',
+            'input.ms-input__field',
+            'input[type="text"]',
+            'input[type="number"]',
+            'textarea'
+        ];
+        for (const sel of selectors) {
+            const input = document.querySelector(sel);
+            if (input) {
+                input.value = answer;
+                input.dispatchEvent(new Event('input', { bubbles: true }));
+                input.dispatchEvent(new Event('change', { bubbles: true }));
+                break;
+            }
+        }
+    }
+
+    // Auto-solve function
+    function autoSolve() {
+        const answer = getCorrectAnswer();
+        if (answer) {
+            fillAnswer(answer);
+            // Optionally, can auto-submit:
+            // const submitBtn = document.querySelector('button[type="submit"], button[aria-label="Submit"]');
+            // if (submitBtn) submitBtn.click();
+            alert('Answer auto-filled! Please review and submit.');
+        } else {
+            alert('Could not find the correct answer on this page.');
+        }
+    }
+
+    // Add the "Auto-Solve" button to the page
+    function addButton() {
+        if (document.getElementById('auto-solve-btn')) return; // Only add once
+        const target = document.querySelector('.ms-btn-group, .ms-actions, header, nav') || document.body;
+        const btn = document.createElement('button');
+        btn.id = 'auto-solve-btn';
+        btn.textContent = 'Auto-Solve';
+        btn.style.cssText = 'z-index:9999; margin:8px; padding:8px 16px; background:#4caf50; color:white; border:none; border-radius:4px; cursor:pointer; font-size:16px;';
+        btn.onclick = autoSolve;
+        target.prepend(btn);
+    }
+
+    // Run on load and on navigation (SPA)
+    function main() {
+        addButton();
+        // Add observer for SPA navigation
+        const observer = new MutationObserver(() => {
+            addButton();
+        });
+        observer.observe(document.body, { childList: true, subtree: true });
+    }
+
+    // Wait for Mathspace to load
+    window.addEventListener('load', () => {
+        setTimeout(main, 1500);
+    });
+})();
